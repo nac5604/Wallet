@@ -2,7 +2,7 @@ options:
     main: <##A993FF>
     other: &f
     prefix: <##A993FF>[Data]&7 
-    string: "mongodb+srv://server:Vsrg08WYa4iKYlCy@cluster0.czdp7vb.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+    string: ""
     stats: "level", "xp", "prestige", "balance", "mined", "stars"
     minestats: "size", "level", "owner", "settings::resetPercentage", "settings::locked", "settings::maxAllowed"
 

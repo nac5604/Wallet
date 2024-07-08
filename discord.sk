@@ -9,7 +9,7 @@ options:
     announceLeaves: true
 
 define new bot named "{@name}":
-    token: "MTI1ODk4MzUzMzAzMzI5MTgyNg.GHzB_M.sPnDN5bo1tXh6jO9-LhVcVP2Wuh8R_2si6b04o"
+    token: ""
     intents: default intents
     auto reconnect: true
     force reload: false
