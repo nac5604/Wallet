@@ -1,0 +1,222 @@
+options:
+    main: <##DB1AF8>
+    other: &f
+
+    red: <##EA3939>
+    green: <##39EA5A>
+    grey: <##3A3939>
+    yellow: <##F8E31A>
+    blue: <##1AA8F8>
+
+import:
+    net.minecraft.world.item.Item
+    java.lang.String
+    Bukkit
+
+function getPlacement(p: player, block: text) :: integer:
+    set {_b::*} to all offline players where [{stats::%input%::mined::%{_block}%} > 0]
+    sort {_b::*} by {stats::%input%::mined::%{_block}%}
+    set {_size} to size of {_b::*}
+    loop {_b::*}:
+        if loop-value is {_p}:
+            return {_size}
+        remove 1 from {_size}
+
+on load:
+    create section with {_p}, {_block} stored in {-section::bm::GetLevel}:
+        loop {-storage::blocks::%{_block}%::bm::rewards::*}:
+            set {_add} to bm_getLevelRequired({_block}, loop-iteration)
+            if {stats::%{_p}%::mined::%{_block}%} >= {_add}:
+                add 1 to {_lvl}
+            else:
+                stop loop
+        return {_lvl} ? 0
+
+    create section with {_p}, {_block}, {_level} stored in {-section::bm::GetTotalMultis}:
+        set {_vals::*} to "money", "xp" and "procchance"
+        loop {_level} times:
+            add 1 to {_loop}
+            loop {_vals::*}:
+                set {_val} to loop-value-2
+                run section {-section::bm::GetMultiPlayer} with {_p}, {_block}, {_val} and store the result in {_multiForVal::%{_val}%} and wait
+                {_multi::%{_val}%} isn't set
+                add {_multiForVal::%{_val}%} to {_multi::%{_val}%}
+        loop {_vals::*}:
+            {_multi::%loop-value%} is set
+            if loop-value isn't "procchance":
+                set {_perc} to "%%"
+                set {_v} to {_multi::%loop-value%}*100
+            add "%loop-value%,%{_v} ? {_multi::%loop-value%}%%{_perc} ? ""%" to {_return::*}
+            delete {_v}, {_perc}
+        return (join {_return::*} with "^")
+
+    create section with {_p}, {_block}, {_multiType} stored in {-section::bm::GetMultiPlayer}:
+        run section {-section::bm::GetLevel} with {_p} and {_block} and store the result in {_level} and wait
+        loop {_level} times:
+            run section {-section::bm::GetMulti} with {_block}, loop-iteration, {_multiType} and store the result in {_s} and wait
+            {_s} isn't 0
+            if {_s} contains "%%":
+                replace all "%%" in {_s} with ""
+                set {_s} to {_s} parsed as number / 100
+                add {_s} to {_total}
+            else:
+                set {_s} to {_s} parsed as number - 1
+                add {_s} to {_total}
+                set {_a} to true
+        add 1 to {_total} if {_a} is true
+        return {_total}
+
+    create section with {_block}, {_level}, {_multiType} stored in {-section::bm::GetMulti}:
+        set {_m::*} to bm_getRewards({_block}, {_level}) split at "|"
+        loop {_m::*}:
+            set {_r::*} to loop-value split at ","
+            if {_r::1} = {_multiType}:
+                return {_r::2}
+        return 0
+
+function bm_getLevelRequired(block: text, level: number) :: number:
+    return bm_getUnserializedValue({_block}, {_level}, 2) parsed as number
+
+function bm_getUnserializedValue(block: text, level: number, value: integer) :: text:
+    return ({_value}th element of getUnserialized({-storage::blocks::%{_block}%::bm::rewards::%{_level}%}))
+
+function getUnserialized(serializedText: text) :: texts:
+    return {_serializedText} split at "^"
+
+function bm_getRewards(block: text, level: number) :: text:
+    return bm_getUnserializedValue({_block}, {_level}, 1)
+
+function bm_formatReward(serializedReward: text) :: text:
+    set {_r::*} to {_serializedReward} split at ","
+    set {_type} to {_r::1}
+    set {_multi} to {_r::2}
+    set {_ispercentage} to "%{_multi}% more" if {_multi} contains "%%" else "+%{_multi}%x"
+    if {_type} is "xp":
+        set {_color} to "{@blue}"
+        set {_txt} to "XP"
+    else if {_type} is "money":
+        set {_color} to "{@green}"
+        set {_txt} to "Money"
+    else if {_type} is "procchance":
+        set {_color} to "{@yellow}"
+        set {_txt} to "Proc Chance"
+    return {_color} + {_ispercentage} + " " + {_txt}
+
+function bm_openRewardsGUI(p: player, block: text, goBackPage: integer=1):
+    play sound "block.piston.extend" with volume 1 and pitch 0.6 to {_p}
+    create new gui with virtual dispenser inventory named "Block Rewards (%formatBlock({_block})%)":
+        set {_slots::*} to integers between 0 and 5
+        format gui slot {_slots::*} with getFiller()
+        format gui slot 7 with dark oak door named "{@red}← Go Back":
+            play sound "block.piston.contract" with volume 1 and pitch 0.6 to {_p}
+            bm_openGUI({_p}, {_goBackPage})
+    open last gui for {_p}
+    edit last gui:
+        run section {-section::bm::GetLevel} with {_p} and {_block} and store the result in {_currentLevel} and wait
+        create section with {_block}, {_level}, {_item}, {_clr}, {_index} stored in {_guiItem}:
+            add "{@grey}Mastery Reward" to {_lore::*}
+            add " " to {_lore::*}
+            if {_item} isn't gray dye:
+                set {_num} to " &8(%{_clr} ? "&8"%#%{_index}%&8)"
+                set {_required} to bm_getLevelRequired({_block}, {_index}) ? 0
+                set {_mined} to ({stats::%{_p}%::mined::%{_block}%} ? 0) if {stats::%{_p}%::mined::%{_block}%} <= {_required} else {_required}
+                set {_maxlevel} to size of {-storage::blocks::%{_block}%::bm::rewards::*}
+                set {_txt} to "&fLv.%{_index}%" if {_index} <= {_maxlevel}
+
+                add "%{_clr} ? "&8"%Ⓡ Rewards" to {_lore::*}
+                set {_rewards::*} to bm_getRewards({_block}, {_index}) split at "|"
+                loop {_rewards::*}:
+                    add " %{_clr} ? "&8"%&l┃ &f%bm_formatReward(loop-value)%" to {_lore::*}
+                add " " to {_lore::*}
+                if {_item} is yellow dye:
+                    add "%{_clr} ? "&8"%Ⓟ Progress" to {_lore::*}
+                    add " %{_clr} ? "&8"%&l┃ {@green}%format({_mined}, 2)% &8/ {@red}%format({_required}, 2)%" to {_lore::*}
+                    add " %{_clr} ? "&8"%&l┃ &8[%progressBar({_mined}, {_required})%&8] &f&l%floor(({_mined}/{_required})*100)%&f%%" to {_lore::*}
+                    add " " to {_lore::*}
+            else:
+                add wrap("Reach this block mastery to reveal its rewards!", "&7") to {_lore::*}
+            return {_item} named "%{_clr} ? "&8"%Block Mastery%{_num} ? ""%" with lore (join {_lore::*} with newline)
+            delete {_lore::*}
+        loop {-storage::blocks::%{_block}%::bm::rewards::*}:
+            add 1 to {_index}
+            set {_item} to gray dye
+            if {_index} = {_currentLevel}+1:
+                set {_item} to yellow dye
+                set {_clr} to "{@yellow}"
+            else if {_currentLevel} >= {_index}:
+                set {_item} to lime dye
+                set {_clr} to "{@green}"
+            run section {_guiItem} with {_block}, {_currentLevel}, {_item}, {_clr}, {_index} and store the result in {_item} and wait
+            format gui slot {_slots::%{_index}%} with {_item}
+            delete {_lore::*}, {_clr}, {_num}
+    
+function bm_openGUI(p: player, page: integer=1):
+    create new gui with virtual chest inventory with size 6 named "Block Masteries (Page #%{_page}%)":
+
+        set {_blocks::*} to {-storage::blocks::*}
+        sort {_blocks::*} by {-storage::blocks::%input%::value}
+        set {_page::*} to page {_page} of {_blocks::*} with 28 lines
+        set {_slots::*} to (integers between 10 and 16), (integers between 19 and 25), (integers between 28 and 34) and (integers between 37 and 43)
+        format gui slot {_slots::*} with getFiller()
+        format gui slot 48 with arrow named "{@red}← Previous Page":
+            if {_page} > 1:
+                bm_openGUI({_p}, {_page}-1)
+            else:
+                editGUI({_p}, 48, barrier named "{@red}❌ No Page Found ❌" with lore wrap("Failed to find the page that was requested.", "&7"))
+        format gui slot 49 with barrier named "{@red}Close":
+            close {_p}'s inventory
+        format gui slot 50 with arrow named "{@green}Next Page →":
+            if (size of {_blocks::*}) > {_page}*27:
+                bm_openGUI({_p}, {_page}+1)
+            else:
+                editGUI({_p}, 50, barrier named "{@red}❌ No Page Found ❌" with lore wrap("Failed to find the page that was requested.", "&7"))
+    open last gui for {_p}
+    edit last gui:
+        set {_slots::*} to (integers between 10 and 16), (integers between 19 and 25), (integers between 28 and 34) and (integers between 37 and 43)
+        create section with {_block}, {_level}, {_placement}, {_mined}, {_item} stored in {_guiItem}:
+            if {_mined} > 0:
+                set {_b} to formatBlock({_block})
+                set {_maxlevel} to size of {-storage::blocks::%{_block}%::bm::rewards::*}
+                set {_required} to bm_getLevelRequired({_block}, {_level}+1)
+                set {_total} to size of all offline players where [{stats::%input%::mined::%{_block}%} > 0]
+                set {_t} to "&fLv.%{_level}+1%" if {_maxlevel} >= {_level}+1
+
+                add "&8Mastery" to {_lore::*}
+                add " " to {_lore::*}
+                add "{@main}ℹ Statistics" to {_lore::*}
+                add " {@main}&l┃ {@other}%format({_mined}, 2)% &7Mined" to {_lore::*}
+                add " {@main}&l┃ &fLv.%{_level}% &8[%progressBar({_mined}, {_required})%&8] %{_t} ? "{@green}&lMAX"%" to {_lore::*}
+                if {_level} > 0:
+                    add " " to {_lore::*}
+                    add "{@main}Ⓑ Boosts" to {_lore::*}
+                    run section {-section::bm::GetTotalMultis} with {_p}, {_block}, {_level} and store the result in {_totalMultis}
+                    loop {_totalMultis} split at "^":
+                        add " {@main}&l┃ %bm_formatReward(loop-value)%" to {_lore::*}
+                add " " to {_lore::*}
+                add "{@main}Ⓟ Placement" to {_lore::*}
+                add " {@main}&l┃ &7You are currently {@main}#&l%format({_placement}, 2)% &7out" to {_lore::*}
+                add " {@main}&l┃ &7of {@main}%format({_total}, 2)% &7total players!" to {_lore::*}
+                add " " to {_lore::*}
+                add "{@main}→ Click to view progress" to {_lore::*}
+                return {_item} parsed as item named "{@main}%{_b}.toLowerCase() in proper case% &8(&fLv.%{_level}%&8)" with lore (join {_lore::*} with new line)
+            else:
+                return gray dye named "&8???" with lore "{@grey}Mastery%nl%%nl%" + wrap("Mine this block one time to add it to your masteries and obtain rewards!", "&7")
+
+        loop {_page::*}:
+            add 1 to {_a}
+            set {_mined} to {stats::%{_p}%::mined::%loop-value%} ? 0
+            set {_block} to "%loop-value%"
+            set {_placement} to getPlacement({_p}, {_block}) ? 0
+            run section {-section::bm::GetLevel} with {_p} and {_block} and store the result in {_level} and wait
+            run section {_guiItem} with {_block}, {_level}, {_placement}, {_mined}, loop-value and store the result in {_item} and wait
+
+            format gui slot {_slots::%loop-iteration%} with {_item}:
+                {_mined} > 0
+                bm_openRewardsGUI({_p}, {_block}, {_page})
+            delete {_lore::*}
+            wait 1 tick if mod(loop-iteration, 10) = 0
+
+command /bm:
+    aliases: /blockmasteries, /blockmastery, /blocksmastery, /bmastery
+    trigger:
+        bm_openGUI(player)

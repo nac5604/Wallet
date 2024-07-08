@@ -1,0 +1,141 @@
+options:
+    main: <##A993FF>
+    other: &f
+    maindarker: <##9074ff>
+    mainlighter: <##CABCFF>
+
+    np: &cYou don't have access to that command.
+
+on command "/sk":
+    player has permission "*"
+    set {_then} to now
+    set {_cmd::*} to full command split at " "
+    wait 1 tick
+    broadcast "&8({@main}Sk&8) &7Reloaded {@main}%{_cmd::3}%.sk&7. &8(&f%difference between now and {_then}%&8)"
+
+on physics:
+    cancel event
+
+on damage of player:
+    cancel event
+
+on hunger meter change:
+    cancel event
+
+on break:
+    player's gamemode is not creative
+    cancel event
+
+on place:
+    player's gamemode is not creative
+    cancel event
+
+on drop:
+    cancel event
+
+command /spawn:
+    trigger:
+        loop mine_audiencesWithPlayer(player):
+            set {_stage} to mine_getStage(loop-value)
+            remove player from stage {_stage}
+        teleport player to {spawn}
+
+command /setspawn:
+    permission: admin
+    permission message: {@np}
+    trigger:
+        set {_spawn} to {spawn}
+        set {spawn} to location of player
+        add " " and "  &8[SPAWN] &fSuccessfully set spawn." to {_msg::*}
+        add "  &8[SPAWN] &f%getXYZ({_spawn})% &f-> %getXYZ({spawn})%" to {_msg::*} if {_spawn} != {spawn}
+        add " " to {_msg::*}
+        send (join {_msg::*} with newline)
+
+on join:
+    set join message to "&7%player% joined."
+    player has not played before:
+        set join message to "&7%player% joined. {@main}&lNEW &8(#%size of all offline players%)"
+    wait 1 tick
+    apply night vision without any particles whilst hiding the potion icon to the player for 9999 days
+    teleport player to {spawn}
+    clear player's scoreboard
+    while player is online:
+        scoreboard(player)
+        wait 3 seconds
+
+on quit:
+    set leave message to "&7%player% left."
+
+    if {-queue::*} contains player:
+        remove player from {-queue::*}
+
+on send command list:
+    if player is not op:
+        add "spawn", "mine", "bm", "blockmastery", "blockmasteries" to {_commands::*}
+        add "pickaxe" to {_commands::*}
+        set command list to {_commands::*}
+
+on async chat:
+    if {_m} starts with "!":
+        stop
+    set {_p} to player
+    set {_m::1} to text component from " &8> "
+    set {_m::2} to text component from "%(getRankPrefix(mine of player) + " ") ? ""%&7%player%&8: &r"
+    set {_m::3} to async chat message
+    set {_format} to merge components {_m::*}
+
+    if "%{_format}%" contains "[item]":
+        set {_t} to translate component of player's tool
+        set hover event of {_t} to hover event showing player's tool
+        set {_m} to merge components ("[", {_t}, "]")
+        component replace "\[item]" with {_m} in {_format}
+    loop {-badwords::*}:
+        component replace loop-index with loop-value in {_format}
+
+    set async chat format to {_format}
+
+function getStat(p: player, stat: text) :: object:
+    return {stats::%{_p}%::%{_stat}%} ? 0
+
+function getMulti(p: player) :: number:
+    return 1
+
+function getXPRequired(level: integer) :: number:
+    return ({_level}+1)*30
+
+function getRankPrefix(mine: text) :: text:
+    set {_level} to {mine::%{_mine}%::level} ? 0
+    set {_txt} to convertText("R%{_level}%")
+    return "&8[{@main}%{_txt}%&8]" if {_mine} is set
+
+function scoreboard(p: player):
+    set title of {_p}'s scoreboard to "&n%gradient(convertText("wallet"), ("9074ff", "A993FF"))%"
+    add " " to {_lines::*}
+    set {_bm} to " &8• {@mainlighter}🔨%format({mine::%mine of {_p}%::blocksMined}, 2)%" if {mine::%mine of {_p}%::blocksMined} > 0
+    add " {@maindarker}&l┃&r {@main}&l%convertText("mine")%%{_bm} ? ""%" to {_lines::*}
+    add " {@maindarker}&l┃&r &7%convertText("rank")%: %getRankPrefix(mine of {_p})%" to {_lines::*}
+    add " {@maindarker}&l┃&r &8[%progressBar(getStat({_p}, "xp"), getXPRequired(getStat({_p}, "level")))%&8] &f%((getStat({_p}, "xp")/getXPRequired((getStat({_p}, "level"))))*100)%%%" to {_lines::*}
+    add " " to {_lines::*}
+    add " {@maindarker}&l┃&r {@main}&l%convertText("stats")%" to {_lines::*}
+    add " {@maindarker}&l┃&r &7%convertText("balance")%: <##50C878>%format(getStat({_p}, "balance"), 1)%" to {_lines::*}
+    add " {@maindarker}&l┃&r &7%convertText("mined")%: <##94b1ff>%format(getStat({_p}, "mined"), 1)%" to {_lines::*}
+    add " {@maindarker}&l┃&r &7%convertText("stars")%: <##F3D51A>%format(getStat({_p}, "stars"), 1)%" to {_lines::*}
+    add " " to {_lines::*}
+
+    loop {_lines::*}:
+        add 1 to {_a}
+        set line {_a} of {_p}'s scoreboard to loop-value
+
+on inventory click:
+    metadata value "clicking" of player is not true
+    event-item is set
+    event-item is not barrier or arrow
+    set metadata value "clicking" of player to true
+    play sound "ui.button.click" with volume 1 and pitch (random number between 1 and 1.4) to player
+    run 1 second later:
+        clear metadata value "clicking" of player
+
+on stop:
+    loop {allStages::*}:
+        delete stage loop-value
+        remove loop-value from {allStages::*}

@@ -1,0 +1,16 @@
+function enchants_getRarity(enchant: text) :: text:
+    return "Common" if {_enchant} is "Efficiency" or "Fortune"
+    return "Legendary" if {_enchant} is "Powerball"
+    return "Rare" if {_enchant} is "Token"
+    return "Common"
+
+function enchants_maxLevel(enchant: text) :: integer:
+    return 5
+
+function enchants_getRarityColor(rarity: text) :: text:
+    return "&f" if {_rarity} is "Common"
+    return "&a" if {_rarity} is "Uncommon"
+    return "&9" if {_rarity} is "Rare"
+    return "&e" if {_rarity} is "Epic"
+    return "&6" if {_rarity} is "Legendary"
+    #return "&f"

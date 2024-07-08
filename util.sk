@@ -1,0 +1,219 @@
+options:
+    np: &cYou don't have access to that command.
+    world: "Map"
+
+import:
+    codes.kooper.blockify.utils.BlockUtils
+
+    ch.njol.skript.variables.Variables
+    ch.njol.skript.util.FileUtils
+    ch.njol.skript.variables.FlatFileStorage
+    java.io.File
+
+function ForceBackup():
+    set {_storages} to Variables.STORAGES
+    set {_flatfile} to first element out of (...{_storages} where [input is instance of FlatFileStorage])
+    if {_flatfile} is not set:
+        send "&c&l[ForceBackup] &cError: Storage not found" to console
+        stop
+    {_flatfile}.saveVariables(false)
+    set {_file} to {_flatfile}.getFile("plugins/Skript/variables.csv")
+    FileUtils.backup({_file})
+
+function BackupPurge():
+    set {_max} to 30 # Number of files required in order to delete
+    set {_goal} to 5 # Number of files you want remaining, you can put 0 to delete all
+    
+    set {_f} to new File("plugins/Skript/backups/")
+    set {_size} to size of ...{_f}.listFiles()
+    if {_size} < {_max}:
+        stop
+        
+    loop ...{_f}.listFiles():
+        set {_files::%loop-iteration%} to loop-value
+        set {_stamps::%loop-iteration%} to (loop-value).lastModified()
+        
+    set {_order::*} to sorted indices of {_stamps::*} in ascending order
+    
+    set {_delete} to {_size} - {_goal}
+    
+    loop {_delete} times:
+        set {_num} to {_order::%loop-iteration%}
+        set {_file} to {_files::%{_num}%}
+        ({_file}).delete()
+        
+    send "&e&l[BackupPurge] &e- Deleted %{_delete}% backup files" to console
+
+every 10 minutes:
+    ForceBackup()
+    BackupPurge()
+
+function progressBar(currentValue: number, total: number, Char: string = "|", color1: string="&a", color2: string="&c", Length: integer = 20) :: string:
+    loop {_Length} times:
+        set {_r} to join ({_r} ? "") and {_Char} 
+    return join {_color1}, (subtext of {_r} from indices 1 to (({_currentValue} / {_total}) * {_Length} * (length of {_Char}))), {_color2} and ((subtext of {_r} from indices (({_currentValue} / {_total}) * {_Length} * (length of {_Char}))+1 to (length of {_r})) ? "")
+
+function sort(indices: strings, values: numbers, descending: boolean = true) :: strings:
+    loop {_indices::*}:
+        set {_sort::%{_values::%loop-index%}%.%loop-index%} to loop-value
+    return (reversed {_sort::*}) if {_descending} is true, else {_sort::*}
+
+function wrap(text: text, color: text = "&7", width: integer = 40) :: text:
+    return "%{_color}%%{_text}%" if (length of {_text}) <= {_width}
+    set {_words::*} to split {_text} at " "
+    set {_lines} to "%{_color}%"
+    set {_trimmed} to "%{_color}%"
+    loop {_words::*}:
+        if (length of {_trimmed} + 1 + length of loop-value) <= {_width}:
+            set {_trimmed} to "%{_trimmed}%%loop-value% "
+        else:
+            set {_lines} to "%{_lines}%%{_trimmed}%%line break%%{_color}%"
+            set {_trimmed} to "%loop-value% "
+    if (length of {_trimmed}) > 0:
+        set {_lines} to "%{_lines}%%{_trimmed}%"
+    return "%{_lines}%%line break%"
+
+function getFiller() :: item:
+    set {_item} to stone button named " "
+    hide entire tool tip of {_item}
+    return {_item}
+
+function editGUI(p: player, guiSlot: number, guiItem: item):
+    stop if metadata value "guiEdit.%{_guiSlot}%" of {_p} is set
+    set {_beforeItem} to slot {_guiSlot} of gui of {_p}
+    set metadata value "openedInventory" of {_p} to now
+    set slot {_guiSlot} of gui of {_p} to {_guiItem}
+    set metadata value "guiEdit.%{_guiSlot}%" of {_p} to true
+    play sound "block.note_block.bass" with volume 10 and pitch 2 to {_p}
+    wait 1 second
+    stop if metadata value "openedInventory" of {_p} is not set
+    stop if slot {_guiSlot} of gui of {_p} != {_guiItem}
+    set slot {_guiSlot} of gui of {_p} to {_beforeItem}
+    delete metadata value "guiEdit.%{_guiSlot}%" of {_p}
+
+on inventory close:
+    metadata value "openedInventory" of player is set
+    delete metadata value "openedInventory" of player
+    delete metadata value "guiEdit.48" of player
+    delete metadata value "guiEdit.50" of player
+
+function format(n: number, type: number=1) :: string:
+    if {_type} = 1:
+        set {_sigma} to floor(log(max(abs({_n}), 1), 1000))
+        set {_a} to round({_n} / (1000 ^ {_sigma}), 2)
+        set {_b::*} to split "k,M,B,T,Qa,Qi,Sx" at ","
+        return "%{_a}%%{_b::%{_sigma}%} ? ""%"
+    if {_type} = 2:
+        return formatted number {_n}
+
+function getXYZ(location: location) :: text:
+    return "%floor(x-coord of {_location})%, %floor(y-coord of {_location})%, %floor(z-coord of {_location})%"
+
+function math_getCorners(loc1: location, loc2: location) :: locations:
+    set {_minX} to min(x-coord of {_loc1}, x-coord of {_loc2})
+    set {_minY} to min(y-coord of {_loc1}, y-coord of {_loc2})
+    set {_minZ} to min(z-coord of {_loc1}, z-coord of {_loc2})
+
+    set {_maxX} to max(x-coord of {_loc1}, x-coord of {_loc2})
+    set {_maxY} to max(y-coord of {_loc1}, y-coord of {_loc2})
+    set {_maxZ} to max(z-coord of {_loc1}, z-coord of {_loc2})
+
+    # first element of getCorners(): Lower corner
+    # second element of getCorners(): Upper corner
+    broadcast location({_minX}, {_minY}, {_minZ}, world {@world})
+    broadcast location({_maxX}, {_maxY}, {_maxZ}, world {@world})
+    return location({_minX}, {_minY}, {_minZ}, world {@world}) and location({_maxX}, {_maxY}, {_maxZ}, world {@world})
+
+function math_getWalls(loc1: location, loc2: location) :: locations:
+    set {_minX} to min(x-coord of {_loc1}, x-coord of {_loc2})
+    set {_minY} to min(y-coord of {_loc1}, y-coord of {_loc2})
+    set {_minZ} to min(z-coord of {_loc1}, z-coord of {_loc2})
+    set {_maxX} to max(x-coord of {_loc1}, x-coord of {_loc2})
+    set {_maxY} to max(y-coord of {_loc1}, y-coord of {_loc2})
+    set {_maxZ} to max(z-coord of {_loc1}, z-coord of {_loc2})
+    add getLocations(location({_minX}, {_minY}, {_minZ}, world {@world}), location({_maxX}, {_maxY}, {_minZ}, world {@world})) to {_walls::*}
+    add getLocations(location({_minX}, {_minY}, {_maxZ}, world {@world}), location({_maxX}, {_maxY}, {_maxZ}, world {@world})) to {_walls::*}
+    add getLocations(location({_minX}, {_minY}, {_minZ}, world {@world}), location({_minX}, {_maxY}, {_maxZ}, world {@world})) to {_walls::*}
+    add getLocations(location({_maxX}, {_minY}, {_minZ}, world {@world}), location({_maxX}, {_maxY}, {_maxZ}, world {@world})) to {_walls::*}
+    return {_walls::*}
+
+function getLocations(loc1: location, loc2: location) :: locations:
+    set {_locs} to BlockUtils.getLocationsBetween({_loc1}, {_loc2})
+    return (...{_locs})
+
+function convertText(text: text) :: text:
+    loop split "ᴀ|A,ʙ|B,ᴄ|C,ᴅ|D,ᴇ|E,ꜰ|F,ɢ|G,ʜ|H,ɪ|I,ᴊ|J,ᴋ|K,ʟ|L,ᴍ|M,ɴ|N,ᴏ|O,ᴘ|P,Q|Q,ʀ|R,ꜱ|S,ᴛ|T,ᴜ|U,ᴠ|V,ᴡ|W,x|X,ʏ|Y,ᴢ|Z" at ",":
+        set {_split::*} to loop-value split at "|"
+        replace all {_split::2} with {_split::1} in {_text}
+    return {_text}
+
+function gradient(text: text, colors: texts) :: text:
+    set {_colors::1} to join "##", {_colors::1} with ""
+    set {_colors::2} to join "##", {_colors::2} with ""
+    return mini message from "<gradient:%{_colors::1}%:%{_colors::2}%>%{_text}%"
+
+function hexFix(hex: text) :: text:
+    replace all "<", ">" in {_hex} with ""
+    return {_hex}
+
+function randcolor(multi: integer, darker: boolean=false) :: text:
+    set {_a} to 1.6
+    set {_a} to 1.3 if {_darker} is true
+    set {_r} to ((sin({_multi})+1)*127.5) * {_a}
+    set {_g} to ((sin({_multi}+120)+1)*127.5) * {_a}
+    set {_b} to ((sin({_multi}+240)+1)*127.5) * {_a}
+
+    set {_clr} to "%rgb(round({_r}), round({_g}), round({_b}))%"
+    replace all "rgb", " " in {_clr} with ""
+    loop ({_clr} split at ","):
+        add loop-value parsed as number to {_return::*}
+    return rgbToHex({_return::*})
+
+function rgbToHex(numbers: numbers) :: text:
+    loop {_numbers::*}:
+        set {_r} to join {_r}, (character at (mod((floor(min(max(loop-value, 0), 255) / 16)), 16) + 1) in "0123456789ABCDEF") and (character at ((mod(min(max(loop-value, 0), 255), 16)) + 1) in "0123456789ABCDEF")
+    return colored "<##%{_r}%>"
+
+function HexToRGB(hex: string) :: numbers:
+    replace all "##" with "" in {_hex}
+    set {_s::*} to split "0123456789abcdefklmnor" at ""
+    loop 3 times:
+        set {_n} to subtext of {_hex} from characters (loop-value -1)*2+1 to loop-value*2 in lower case
+        add (index of first element out of (split {_n} at "") in "0123456789abcdefklmnor" -1)* 16 to {_rgb::%loop-value-1%}
+        add index of 2nd element out of (split {_n} at "") in "0123456789abcdefklmnor"-1  to {_rgb::%loop-value-1%}
+    return {_rgb::*}
+
+function formatBlock(block: text) :: text:
+    set {_b} to "%({_block} parsed as item).getType()%"
+    replace all "_" in {_b} with " "
+    return {_b}.toLowerCase() in proper case
+
+function blockDataToItem(blockdata: blockdata) :: item:
+    set {_a::*} to "%{_blockdata}%" split at ":"
+    if ({_a::2} parsed as item) is set:
+        return {_a::2} parsed as item
+    else:
+        replace all "_" in {_a::2} with " "
+        return {_a::2} parsed as item
+
+function bossbar(p: player, id: text, title: text, progress: integer, color: text="blue"):
+    set {_bar} to boss bar with id {_id} with title {_title} with color {_color} with progress {_progress}
+    add {_p} to {_bar}
+
+command /gmc:
+    permission: *
+    permission message: {@np}
+    trigger:
+        set player's gamemode to creative
+
+command /gms:
+    permission: *
+    permission message: {@np}
+    trigger:
+        set player's gamemode to survival
+
+command /gmsp:
+    permission: *
+    permission message: {@np}
+    trigger:
+        set player's gamemode to spectator

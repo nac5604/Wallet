@@ -1,0 +1,160 @@
+import:
+    com.sk89q.worldedit.bukkit.BukkitAdapter
+    com.sk89q.worldedit.WorldEdit
+    com.sk89q.worldedit.regions.CuboidRegion
+    org.bukkit.inventory.ItemStack
+    com.sk89q.worldedit.extension.input.ParserContext
+    com.sk89q.worldedit.extent.clipboard.Clipboard
+    com.sk89q.worldedit.extent.clipboard.io.ClipboardFormats
+    com.sk89q.worldedit.function.operation.Operations
+    com.sk89q.worldedit.function.pattern.RandomPattern
+    com.sk89q.worldedit.math.BlockVector3
+    com.sk89q.worldedit.regions.Polygonal2DRegion
+    com.sk89q.worldedit.session.ClipboardHolder
+    com.sk89q.worldedit.world.block.BlockTypes
+    java.util.HashSet
+    java.io.File
+    java.io.FileInputStream
+    java.nio.file.Files
+
+on load:
+	set {-worldedit::instance} to WorldEdit.getInstance()
+
+function worldedit_createSession(world: world) :: javaobject:
+	set {_w} to BukkitAdapter.adapt({_world})
+	set {_session} to {-worldedit::instance}.getEditSessionFactory().getEditSession({_w}, -1)
+	return {_session}
+
+function worldedit_getWorld(world: world) :: javaobject:
+	return BukkitAdapter.adapt({_world})
+
+function region_poly(points: locations) :: javaobject:
+	set {_region} to new Polygonal2DRegion()
+	loop {_points::*}:
+		{_region}.addPoint(worldedit_toVector(loop-value))
+		if {_maxy} is not set:
+			set {_maxy} to loop-value.getBlockY()
+			set {_miny} to loop-value.getBlockY()
+		if loop-value.getBlockY() > {_maxy}:
+			set {_maxy} to loop-value.getBlockY()
+		if loop-value.getBlockY() < {_miny}:
+			set {_miny} to loop-value.getBlockY()
+	{_region}.setMaximumY({_maxy})
+	{_region}.setMinimumY({_miny})
+	return {_region}
+
+function region_cuboid(loc1: location, loc2: location) :: javaobject:
+	set {_loc1} to worldedit_toVector({_loc1})
+	set {_loc2} to worldedit_toVector({_loc2})
+	set {_region} to new CuboidRegion({_loc1}, {_loc2})
+	return {_region}
+
+function pattern_randomPattern(b: text) :: javaobject:
+	set {_pattern} to new RandomPattern()
+	loop {_b} split at ",": 
+		if loop-value contains "%%": 
+			set {_itemstack} to 2nd element of (loop-value split at "%%") parsed as itemtype
+			set {_percent} to 1st element of (loop-value split at "%%") parsed as number
+		else:
+			set {_itemstack} to loop-value parsed as itemtype
+			set {_percent} to 1
+		
+		set {_material} to {_itemstack}.getRandom().getType()
+		set {_block} to BukkitAdapter.adapt({_material}.createBlockData())
+		{_pattern}.add({_block}, {_percent})
+	return {_pattern}
+
+function pattern_parseFromString(p: offlineplayer, input: text) :: javaobject:
+	set {_patternfactory} to {-worldedit::instance}.getPatternFactory()
+	set {_parsercontext} to new ParserContext()
+	{_parsercontext}.setActor(BukkitAdapter.adapt({_p}))
+	return {_patternfactory}.parseFromInput({_input}, {_parsercontext})
+
+function pattern_getCompletions(input: text) :: texts:
+	return ...({-worldedit::instance}.getPatternFactory().getSuggestions({_input}))
+
+function mask_parseFromString(p: offlineplayer, input: text, session: javaobject) :: javaobject:
+	set {_maskfactory} to {-worldedit::instance}.getMaskFactory()
+	set {_parsercontext} to new ParserContext()
+	{_parsercontext}.setActor(BukkitAdapter.adapt({_p}))
+	{_parsercontext}.setExtent({_session})
+	return {_maskfactory}.parseFromInput({_input}, {_parsercontext})
+
+function worldedit_setBlocks(session: javaobject, region: javaobject, pattern: javaobject) :: number:
+	set {_i} to {_session}.setBlocks({_region}, {_pattern})
+	return {_i}
+
+function worldedit_setWall(session: javaobject, region: javaobject, pattern: javaobject):
+	{_session}.makeCuboidWalls({_region}, {_pattern})
+
+function worldedit_replace(session: javaobject, region: javaobject, mask: javaobject, pattern: javaobject):
+	{_session}.replaceBlocks({_region}, {_mask}, {_pattern})
+
+function worldedit_deform(session: javaobject, region: javaobject, expression: text):
+	set {_min} to {_region}.getMinimumPoint().toVector3()
+	set {_max} to {_region}.getMaximumPoint().toVector3()
+	set {_zero} to {_max}.add({_min}).divide(2)
+	set {_unit} to {_max}.subtract({_zero})
+	{_session}.deformRegion({_region}, {_zero}, {_unit}, {_expression}, 10000)
+
+function worldedit_saveSchem(path: text, origin: location, start: location, end: location):
+	set {_file} to new File({_path})
+
+	set {_world} to worldedit_getWorld({_start}.getWorld())
+
+	set {_start} to worldedit_toVector({_start})
+	set {_end} to worldedit_toVector({_end})
+	set {_origin} to worldedit_toVector({_origin})
+
+	set {_region} to new CuboidRegion({_world}, {_start}, {_end})
+	set {_clipboard} to Clipboard.create({_region})
+	{_clipboard}.setOrigin({_origin})
+
+	set {_format} to ClipboardFormats.findByFile({_file})
+
+	{_clipboard}.save({_file}, {_format})
+
+
+function worldedit_pasteSchem(session: javaobject, file: text, origin: location):
+	set {_file} to new File({_file})
+	set {_format} to ClipboardFormats.findByFile({_file})
+
+	set {_reader} to {_format}.getReader(new FileInputStream({_file}))
+	set {_clipboard} to {_reader}.read()
+
+	{_reader}.close()
+
+	set {_vector} to worldedit_toVector({_origin})
+
+	set {_operation} to (new ClipboardHolder({_clipboard}).createPaste({_session}).ignoreAirBlocks(true).copyEntities(false).to({_vector}).build())
+
+	Operations.complete({_operation})
+
+function worldedit_closeSession(session: javaobject):
+	{_session}.flushQueue()
+
+function worldedit_toVector(loc: location) :: javaobject:
+	return BlockVector3.at({_loc}.getBlockX(), {_loc}.getBlockY(), {_loc}.getBlockZ())
+
+function worldedit_getSkriptLocation(l: javaobject) :: location:
+	return location({_l}.getX(), {_l}.getY(), {_l}.getZ())
+
+function worldedit_getSelection1(p: offlineplayer) :: location:
+	set {_actor} to BukkitAdapter.adapt({_p})
+	set {_manager} to {-worldedit::instance}.getSessionManager()
+	set {_localSession} to {_manager}.get({_actor})
+	set {_w} to BukkitAdapter.adapt({_localSession}.getSelectionWorld())
+	set {_selection} to {_localSession}.getSelection()
+	set {_loc} to worldedit_getSkriptLocation({_selection}.getPos1())
+	{_loc}.setWorld({_w})
+	return {_loc}
+
+function worldedit_getSelection2(p: offlineplayer) :: location:
+	set {_actor} to BukkitAdapter.adapt({_p})
+	set {_manager} to {-worldedit::instance}.getSessionManager()
+	set {_localSession} to {_manager}.get({_actor})
+	set {_w} to BukkitAdapter.adapt({_localSession}.getSelectionWorld())
+	set {_selection} to {_localSession}.getSelection()
+	set {_loc} to worldedit_getSkriptLocation({_selection}.getPos2())
+	{_loc}.setWorld({_w})
+	return {_loc}

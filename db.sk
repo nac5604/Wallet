@@ -1,0 +1,159 @@
+options:
+    main: <##A993FF>
+    other: &f
+    prefix: <##A993FF>[Data]&7 
+    string: "mongodb+srv://server:Vsrg08WYa4iKYlCy@cluster0.czdp7vb.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+    stats: "level", "xp", "prestige", "balance", "mined", "stars"
+    minestats: "size", "level", "owner", "settings::resetPercentage", "settings::locked", "settings::maxAllowed"
+
+on load:
+    set {-db::server} to mongo server with connection string {@string}
+    set {-db::storage} to mongo database "storage" of {-db::server}
+    set {-db::players} to mongo collection "players" of {-db::storage}
+    set {-db::mines} to mongo collection "mines" of {-db::storage}
+
+function db_error(text: text = "An error has occurred while attempting to alter your stats...") :: text:
+    return "{@prefix} &7%{_text}%"
+
+function db_getDoc(u: text, type: text="player") :: mongosk document:
+    return first mongo document with mongosk filter where field "_id" is {_u} of collection {-db::%{_type}%}
+
+on join:
+    wait 1 tick
+    db_loadStats(player's uuid, "players")
+
+    if mine of player is set:
+        db_loadStats(mine of player, "mines")
+
+on quit:
+    db_saveStats(player's uuid, "players")
+
+on command:
+    {savingStats::%player%} is set
+    cancel event
+    db_error("Currently loading your stats.")
+
+on chat:
+    {savingStats::%player%} is set
+    cancel event
+    db_error("Currently loading your stats.")
+
+on player move:
+    if {savingStats::%player%} is set:
+        cancel event
+        db_error("Currently loading your stats. Please wait.")
+    else if player has potion blindness:
+        cancel event
+        (difference between metadata value "spam.loadingMine" of player and now >= 3 seconds) || (metadata value "spam.loadingMine" of player is not set)
+        send "{@main}[Mines] &7Your mine is loading. Please wait."
+        play sound "block.note_block.pling" with volume 1 and pitch 1 to player
+        set metadata value "spam.loadingMine" of player to now
+
+function db_serializeMineStats(u: text) :: texts:
+    loop {-storage::blocks::*} where [{stats::%{_u}%::mined::%input%} > 0]:
+        add "%loop-value%,%{stats::%{_u}%::mined::%loop-value%}%" to {_r::*}
+    return {_r::*}
+
+function db_createStats(u: text, type: text="players"):
+    set {savingStats::%{_u}%} to true
+    if db_getDoc({_u}, {_type}) is not set:
+        set {_doc} to new mongo document
+        set mongo value "_id" of {_doc} to {_u}
+        insert mongo document {_doc} into collection {-db::%{_type}%}
+        db_saveStats({_u}, {_type})
+    else if {_type} is "players":
+        loop {@stats}:
+            delete {stats::%({_u} parsed as offline player)%::%loop-value%}
+        db_saveStats({_u})
+    else if {_type} is "mines":
+        set {_mine} to {_u}
+        loop audience of mine_getStage({_mine}):
+            set {_player} to loop-player
+            remove {_player} from audience of mine_getStage({_mine})
+            teleport {_player} to {spawn}
+        delete stage mine_getStage({_mine})
+        delete {mine::%{_mine}%::*}
+        delete {mine::%{_mine}%}
+        db_saveStats({_mine}, "mines")
+
+function db_loadStats(u: text, type: text="players"):
+    set {_doc} to db_getDoc({_u}, {_type})
+    set {savingStats::%{_u}%} to true
+    if {_doc} is not set:
+        db_createStats({_u}, {_type})
+    else if {_type} is "players":
+        set {_p} to {_u} parsed as offline player
+        set mongo value "player" of {_doc} to "%{_p}%"
+        if mine of {_p} is set:
+            set mongo value "mine" of {_doc} to mine of {_p}
+        loop {@stats}:
+            set {stats::%{_p}%::%loop-value%} to mongo value loop-value of {_doc} ? 0
+        if mongo list "blockmastery" of {_doc} is set:
+            loop mongo list "blockmastery" of {_doc}:
+                set {_r::*} to loop-value split at ","
+                set {stats::%{_p}%::mined::%{_r::1}%} to {_r::2} parsed as integer
+        send "{@prefix} Loaded your stats." to {_p}
+    else if {_type} is "mines":
+        set {_mine} to {_u}
+        loop {@minestats}:
+            set {mine::%{_mine}%::%loop-value%} to mongo value loop-value of {_doc} ? 0
+    update mongo document {_doc} of {-db::%{_type}%}
+    delete {savingStats::%{_u}%}
+
+function db_saveStats(u: text, type: text="players"):
+    set {_doc} to db_getDoc({_u}, {_type})
+    if {_doc} isn't set:
+        db_createStats({_u}, {_type})
+    else if {_type} is "players":
+        set {_p} to {_u} parsed as offline player
+        set mongo value "player" of {_doc} to "%{_p}%"
+        if all:
+            mine of {_p} is set
+            mongo value "mine" of {_doc} != mine of {_p}
+        then:
+            set mongo value "mine" of {_doc} to mine of {_p}
+        set mongo value "mine" of {_doc} to "" if mine of {_p} isn't set && mongo value "mine" of {_doc} isn't ""
+        loop {@stats}:
+            if {stats::%{_p}%::%loop-value%} is not set:
+                set {stats::%{_p}%::%loop-value%} to 0
+            set mongo value loop-value of {_doc} to {stats::%{_p}%::%loop-value%} ? 0
+        set mongo list "blockmastery" of {_doc} to db_serializeMineStats({_u})
+        send "{@prefix} Saved your stats." to {_p}
+    else if {_type} is "mines":
+        # is a mine
+        set {_mine} to {_u}
+        loop {@minestats}:
+            set {_set} to "None" if loop-value isn't "level" or "size" else 0
+            set mongo value loop-value of {_doc} to {mine::%{_mine}%::%loop-value%} ? {_set}
+        set mongo list "settings" of {_doc} to {_a::*}
+    update mongo document {_doc} of {-db::%{_type}%}
+
+function db_deleteStats(u: text, type: text="players"):
+    set {_doc} to db_getDoc({_u}, {_type})
+    stop if {_doc} is not set
+    remove mongo document {_doc} of {-db::%{_type}%}
+
+function db_setStat(u: text, stat: text, set: object, type: text="players"):
+    set {savingStats::%{_u}%} to true
+    set {_doc} to db_getDoc({_u}, {_type})
+    if {_doc} isn't set:
+        db_createStats({_u}, {_type})
+    else:
+        set mongo value "%{_stat}%" of {_doc} to {_set}
+        update mongo document {_doc} of {-db::%{_type}%}
+    delete {saviingStats::%{_u}%}
+
+function db_getStat(u: text, stat: text, type: text="players") :: object:
+    set {_doc} to db_getDoc({_u}, {_type})
+    if {_doc} is not set:
+        db_createStats({_u}, {_type})
+    else:
+        return mongo value "%{_stat}%" of {_doc}
+
+every 10 minutes:
+    loop all players:
+        db_saveStats("%loop-player's uuid%", "players")
+    broadcast "{@prefix} &7Saved all player stats."
+    loop {mines::*}:
+        db_saveStats(loop-value, "mines")
+    broadcast "{@prefix} &7Saved all mines."

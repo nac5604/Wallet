@@ -1,0 +1,27 @@
+options:
+    np: &cYou don't have access to that command.
+
+function registerBadWord(s: string, r: string):
+    set {-badwords::%{_s}%} to {_r}
+
+on load:
+    registerBadWord("shit", "shirt")
+    registerBadWord("fuck", "fork")
+    registerBadWord("bitch", "bench")
+    registerBadWord("ass", "ash")
+    registerBadWord("dick", "deck")
+    registerBadWord("cock", "cork")
+    registerBadWord("faggot", "puppy")
+    registerBadWord("nigger", "kitty cat")
+    registerBadWord("nigga", "ninja")
+
+command /clearchat:
+    permission: admin
+    permission message: {@np}
+    trigger:
+        loop {-signatures::*}:
+            set {_s} to loop-value
+            remove all players from {_s}
+        delete {-signatures::*}
+
+        broadcast "%nl%  &7The chat has been cleared.%nl% "

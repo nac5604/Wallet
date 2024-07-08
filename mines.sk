@@ -1,0 +1,589 @@
+options:
+    main: <##A993FF>
+    other: &f
+    prefix: <##A993FF>[Mines]&r
+    red: <##EA3939>
+    green: <##39EA5A>
+    grey: <##3A3939>
+    yellow: <##F8E31A>
+    blue: <##1AA8F8>
+    world: "Map"
+    
+    settings: "locked", "resetPercentage", "tax", "maxAllowed"
+
+    defaultSize: 10
+    defaultY: 5
+    levelSizeIncrease: 1
+    levelSizeIncreaseY: 5
+    maxSize: 46 # please make this even number so shit dont break
+    maxSizeY: 50
+
+import:
+    codes.kooper.blockify.utils.BlockUtils
+    org.bukkit.potion.PotionEffect
+    org.bukkit.potion.PotionEffectType
+    org.bukkit.entity.Player
+
+    org.bukkit.Bukkit
+    ch.njol.skript.Skript
+    java.lang.Runnable
+
+expression mine of %object%:
+    get:
+        return {stats::%expr-1%::mine}
+
+expression mine audience of %object%:
+    get:
+        return audience of mine_getStage(expr-1)
+
+on tab complete of "/mine" or "/mines":
+    set tab completions for position 1 to "create", "visit", "home", "reset"
+    if tab arg-1 is "visit":
+        set tab completions for position 2 to {mines::*} where [mine_getStage(input) is set]
+    else if tab arg-1 is "create":
+        set tab completions for position 2 to "<name>"
+
+function mine_getStage(mine: text) :: stage:
+    return stage "mine-%{_mine}%"
+
+function mine_audiencesWithPlayer(p: player) :: texts:
+    return {mines::*} where [audience of mine_getStage(input) contains {_p}]
+
+function mine_getPlayerCurrentMine(p: player) :: text:
+    return 1st element of mine_audiencesWithPlayer({_p})
+
+function mine_getCenter() :: location:
+    return {mineCenter} ? location(0, 0, 0, world {@world})
+
+function mine_getView(stage: stage, view: text) :: view:
+    return view {_view} in stage {_stage}
+
+function mine_getMineFromStage(stage: stage) :: text:
+    if "%{_stage}%" contains "mine-":
+        set {_a::*} to "%{_stage}%" split at "-"
+        return {_a::2}
+
+function mine_resetMine(mine: text):
+    set {_stage} to mine_getStage({_mine})
+    set {_view} to mine_getView({_stage}, "mine")
+    change pattern of view {_view} to mine_getPattern({_mine}) ? "SANDSTONE:0.99|GOLD_BLOCK:0.01"
+    reset blocks in view {_view}
+    loop (audience of mine_getStage({_mine})):
+        set {_x} to x-coord of location of loop-value
+        set {_z} to z-coord of location of loop-value
+        set {_loc} to location of block above highest block of {_view} at {_x} and {_z}
+        set yaw of {_loc} to yaw of loop-value
+        set pitch of {_loc} to pitch of loop-value
+        teleport loop-value to {_loc}
+        send title "{@main}%convertText("mine reset")%" with subtitle "&fThe mine you are at has reset." to loop-value
+    refresh blocks to audience in stage mine_getStage({_mine}) at {-allLocations::*}
+    set {mine::%{_mine}%::lastReset} to now
+
+function mine_canReset(mine: text) :: boolean:
+    return true if {mine::%{_mine}%::lastReset} is not set
+    return true if difference between now and {mine::%{_mine}%::lastReset} >= 1 minute
+    return false
+
+function mine_teleportToMine(p: player, mine: text):
+    if {-loading} is true:
+        send "{@prefix} &7The mines have not finished reloading. Trying again in 2 seconds.." to {_p}
+        wait 2 seconds
+        mine_teleportToMine({_p}, {_mine})
+        stop
+    run section {-section::ShowMine} with {_p}, {_mine} and wait
+    wait 1 tick
+    teleport {_p} to {mine::%{_mine}%::home}
+    send "{@prefix} &7Teleported." to {_p}
+    play sound "entity.player.teleport" with volume 10 and pitch 1 to {_p}
+
+function mine_deleteMine(mine: text):
+    db_deleteStats({_mine}, "mines")
+    loop all players where [mine of input = {_mine}]:
+        set {_p} to loop-value
+        delete {stats::%{_p}%::mine}
+        add {_p} to {_all::*}
+    loop {mines::*}:
+        if loop-value contains {_mine}:
+            remove loop-value from {mines::*}
+    delete {mine::%{_mine}%::*}
+    delete stage mine_getStage({_mine})
+    loop {_all::*}:
+        set {_p} to loop-value
+        send "{@prefix} &7The mine {@main}%{_mine}% &7has been deleted." to {_p}
+        teleport {_p} to {spawn}
+
+function mine_createMine(mine: text, p: player):
+    set {stats::%{_p}%::mine} to {_mine}
+    set {mine::%{_mine}%::owner} to {_p}'s uuid
+    set {mine::%{_mine}%::size} to {@defaultSize}
+    set {mine::%{_mine}%::level} to 0
+    set {mine::%{_mine}%::settings::locked} to true
+    set {mine::%{_mine}%::settings::tax} to 10
+    set {mine::%{_mine}%::settings::resetPercentage} to 75
+    set {mine::%{_mine}%::settings::maxAllowed} to 3
+    add {_mine} to {mines::*}
+    set {_loc} to mine_getCenter() ~ vector(0.5, 1, 35.5)
+    set yaw of {_loc} to 180
+    set pitch of {_loc} to 3
+    set {mine::%{_mine}%::home} to {_loc}
+    db_saveStats({_mine}, "mines")
+    db_saveStats({_p}'s uuid, "players")
+    
+    mine_teleportToMine({_p}, {_mine})
+
+function mine_resetAudiencesWithPlayer(p: player):
+    set {_p} to "%{_p}%" parsed as player
+    loop mine_audiencesWithPlayer({_p}):
+        set {_stage} to mine_getStage(loop-value)
+        hide view mine_getView({_stage}, "bedrock") from {_p}
+        hide view mine_getView({_stage}, "mine") from {_p}
+        remove {_p} from stage {_stage}
+        wait 1 tick if mod(loop-iteration, 5) = 0
+
+function mine_getPattern(mine: text) :: text:
+    set {_block} to formatBlock({-storage::minelevels::%{mine::%{_mine}%::level} ? 0%::block})
+    replace all " " in {_block} with "_"
+    if {mine::%{_mine}%::level} < 1:
+        return "%{_block} in UPPERCASE%:1.0"
+    else:
+        return "%{_block} in UPPERCASE%:0.99|GOLD_BLOCK:0.01"
+
+on blockify stage create:
+    broadcast event-stage
+    add event-stage to {allStages::*}
+
+on blockify stage delete:
+    broadcast event-stage
+    loop {allStages::*}:
+        remove loop-value from {allStages::*} if loop-value = event-stage
+
+on load:
+    set {_then} to now
+    set {-loading} to true
+
+    create section with {_loc1} and {_loc2} stored in {-section::GetBlocksWithin}:
+        set {_locs} to BlockUtils.getLocationsBetween({_loc1}, {_loc2})
+        set {_locs::*} to (...{_locs})
+        return {_locs::*}
+
+    if {-allLocations::*} isn't set:
+        run section {-section::GetBlocksWithin} with location(24, 0, 24, world {@world}) and location(-24, -50, -24, world {@world}) and store the result in {-allLocations::*} and wait
+    if {-bedrockLoc::*} isn't set:
+        run section {-section::GetBlocksWithin} with location(24, 0, 24, world {@world}) and location(-24, 0, -24, world {@world}) and store the result in {-bedrockLoc::*} and wait
+
+    create section with {_p}, {_mine} stored in {-section::NewMine}:
+        stop if {-creatingStage::%{_mine}%} is set
+        set {-creatingStage::%{_mine}%} to true
+        set {_p} to "%{_p}%" parsed as player
+        create stage with name "mine-%{_mine}%" between location(24, 0, 24, world {@world}) and location(-24, -50, -24, world {@world}) in world {@world} for {_p}
+        set {_stage} to mine_getStage({_mine})
+        set chunks sent per tick to 100 for stage {_stage}
+        set {mine::%{_mine}%::createdStage} to now
+        delete {-creatingStage::%{_mine}%}
+        
+        run section {-section::ShowMine} with {_p} and {_mine}
+
+    create section with {_p}, {_mine} stored in {-section::ShowViews}:
+        set {_stage} to mine_getStage({_mine})
+        send view mine_getView({_stage}, "mine") to {_p}
+        wait 5 ticks
+        send view mine_getView({_stage}, "bedrock") to {_p}
+
+    create section with {_p}, {_mine} stored in {-section::ShowMine}:
+        set {_p} to "%{_p}%" parsed as player
+        set {_stage} to mine_getStage({_mine})
+        if {_stage} is not set:
+            run section {-section::NewMine} with {_p}, {_mine} and wait
+        else:
+            mine_resetAudiencesWithPlayer({_p})
+            add {_p} to stage {_stage}
+            if mine_getView({_stage}, "mine") is not set:
+                create view for stage {_stage} with name "mine" with pattern mine_getPattern({_mine}) ? "SANDSTONE:0.99|GOLD_BLOCK:0.01" that is breakable
+                run section {-section::ShowMineBlocks} with {_p}, {_mine} and wait
+            if mine_getView({_stage}, "bedrock") is not set:
+                create view for stage {_stage} with name "bedrock" with pattern "BEDROCK:1.0" that isn't breakable
+                run section {-section::ShowMineBlocks} with {_p}, {_mine} and wait
+            wait 3 ticks
+            run section {-section::ShowViews} with {_p}, {_mine} and wait
+            refresh blocks to audience in stage {_stage} at {-allLocations::*}
+
+    create section with {_p}, {_mine} stored in {-section::ShowMineBlocks}:
+        set {_p} to "%{_p}%" parsed as player
+        set {_size} to ({mine::%{_mine}%::size} ? {@defaultSize})
+        set {_size} to {_size} if {_size} <= {@maxSize} else {@maxSize}
+        set {_size2} to floor({_size}/2)
+        set {_y} to {_size}-1 if {_size}-1 <= {@maxSizeY} else {@maxSizeY}
+        set {_loc1} to mine_getCenter() ~ vector({_size2}, 0, {_size2})
+        set {_loc2} to mine_getCenter() ~ vector(({_size2}/-1), -{_y}, ({_size2}/-1))
+        set {mine::%{_mine}%::loc1} to {_loc1}
+        set {mine::%{_mine}%::loc2} to {_loc2}
+        run section {-section::GetBlocksWithin} with {_loc1} and {_loc2} and store the result in {_mine::*} and wait
+        set {_walls::*} to math_getWalls(({_loc1} ~ vector(1, 0, 1)), ({_loc2} ~ vector(-1, -1, -1)))
+        remove 1 from y-coord of {_loc2}
+        set y-coord of {_loc1} to y-coord of {_loc2}
+        run section {-section::GetBlocksWithin} with ({_loc1} ~ vector(1, 0, 1)) and ({_loc2} ~ vector(-1, 0, -1)) and store the result in {_bottom::*} and wait
+        set {_m::*} to {_mine::*} where [y-coord of input = 0]
+        set {_bedrockLoc::*} to {-bedrockLoc::*} where [{_m::*} doesn't contain input]
+        
+        set {_stage} to mine_getStage({_mine})
+        add blocks from {_mine::*} to view mine_getView({_stage}, "mine")
+        set {_time} to ((size of {_mine::*})/5000)+10
+        wait "%{_time}% ticks" parsed as timespan
+        
+        add blocks from {_bedrockLoc::*} to view mine_getView({_stage}, "bedrock")
+        wait 3 ticks
+        add blocks from {_bottom::*} to view mine_getView({_stage}, "bedrock")
+        wait 3 ticks
+        add blocks from {_walls::*} to view mine_getView({_stage}, "bedrock")
+
+        run section {-section::ShowViews} with {_p}, {_mine} and wait
+        refresh blocks to audience in stage {_stage} at {_allLocations::*}
+
+    create section with {_mine} stored in {-section::IncreaseSize}:
+        stop if {mine::%{_mine}%::size} >= {@maxSize}
+        if {mine::%{_mine}%::size}+2 <= {@maxSize}:
+            set {_a} to 2
+        else if {mine::%{_mine}%::size}+1 <= {@maxSize}:
+            set {_a} to 1
+        stop if {_a} isn't set
+        add {_a} to {mine::%{_mine}%::size}
+        set {_audience::*} to audience of mine_getStage({_mine})
+        delete stage mine_getStage({_mine})
+        loop {_audience::*}:
+            send "{@prefix} &7The mine {@main}%{_mine}% &7has increased in size." to loop-value
+            wait 1 tick
+            run section {-section::ShowMine} with loop-value, {_mine}
+        db_saveStats({_mine}, "mines")
+        
+
+    delete {-loading}
+    broadcast "&8({@main}Sk&8) &7Loaded all {@main}sections&7. &8(&f%difference between now and {_then}%&8)"
+
+on quit:
+    if all:
+        mine_getStage(mine of player) is set
+        size of (audience of mine_getStage(mine of player) where [input != player]) <= 0
+        difference between now and {mine::%mine of player%::createdStage} >= 3 minutes
+    then:
+        delete stage mine_getStage(mine of player)
+    mine_resetAudiencesWithPlayer(player)
+
+on join:
+    wait 1 tick
+    mine of player is set
+    if size of {-queue::*} > 0 || {-loading} is set:
+        send "{@main}[Queue] &7Adding to queue..."
+        add player to {-queue::*}
+    else:
+        mine_teleportToMine(player, mine of player)
+
+every second:
+    size of {-queue::*} > 0
+    loop {-queue::*}:
+        add 1 to {_a} if {-queue::%{_a}%} != loop-value
+        if {-loading} is set:
+            send action bar "{@main}[Queue] &7Loading the mines.. &8(&a%{_a} ? "N/A"%&8/&c%size of {-queue::*}%)" to loop-value
+        else:
+            send action bar "{@main}[Queue] &7Creating mine for {@main}%{-queue::1}%&7. &8(&a%{_a} ? "N/A"%&8/&c%size of {-queue::*}%)" to loop-value
+    {-loading} is not set
+    loop {-queue::*}:
+        if loop-value is connected:
+            set {_player} to loop-value
+            stop loop
+    if {_player} is set:
+        mine_teleportToMine({_player}, mine of {_player})
+        remove {_player} from {-queue::*}
+
+function mine_getSetting(mine: text, setting: text) :: object:
+    return {mine::%{_mine}%::settings::%{_setting}%}
+
+function mine_canVisit(p: player, mine: text) :: boolean:
+    set {_locked} to mine_getSetting({_mine}, "locked") ? true
+    return true if {_locked} is true
+    return false if size of audience of mine_getStage({_mine}) >= mine_getSetting({_mine}, "maxAllowed")
+    return true
+
+function mine_openGUI(p: player, mine: text, type: text="main", playsound: boolean=true):
+    if {_type} is "main":
+        create new gui with virtual chest inventory with size 6 named "Mine GUI (%{_mine}%)":
+            format gui slot 10 with red bed named "{@main}[Mine] &7Teleport" with lore "&8Mine Home%nl%%nl%%wrap("Click to teleport to the spawnpoint of your mine.", "&7", 30)% ":
+                mine_teleportToMine({_p}, {_mine})
+
+            set {_level} to {mine::%{_mine}%::level} ? 0
+
+            add "&8List" to {_mStats::*}
+            add " " to {_mStats::*}
+            add "{@main}Ⓘ Info" to {_mStats::*}
+            add " {@main}&l┃ &7Mined: {@main}⛏%format(({mine::%{_mine}%::totalMined} ? 0), 2)%" to {_mStats::*}
+            add " {@main}&l┃ &7Level: {@other}%{_level}% &8[%progressBar({mine::%{_mine}%::blocksMined}, mine_getBlocksNeeded({_level}))%&8] &f%{_level} + 1% &8| &f&l%floor(({mine::%{_mine}%::blocksMined}/mine_getBlocksNeeded({_level}))*100)%&f%%" to {_mStats::*}
+            add " {@main}&l┃ &7Owner: {@main}%{mine::%{_mine}%::owner} parsed as offline player%" to {_mStats::*}
+            add " " to {_mStats::*}
+            add "{@main}Ⓢ Settings" to {_mStats::*}
+            
+            
+
+            format gui slot 13 with empty map named "{@main}[Mine] &7Mine Stats" with lore (join {_mStats::*} with newline)
+
+            format gui slot 15 with oak sapling named "{@main}[Mine] &7Levels" with lore "&8Clickable%nl%%nl%%wrap("Click to view the mine levels GUI!", "&7", 30)% ":
+                set {_page} to 1+floor({mine::%{_mine}%::level}/20)
+                mine_openLevelGUI({_p}, {_mine}, {_page}, true)
+
+            format gui slot 16 with redstone comparator named "{@main}[Mine] &7Settings" with lore "&8Clickable%nl%%nl%%wrap("Click to view the settings of your mine.", "&7", 30)% ":
+                mine_openGUI({_p}, {_mine}, "settings")
+
+            set {_reset} to "&cThis is on cooldown!" if mine_canReset({_mine}) is false
+            format gui slot 25 with dragon breath named "{@main}[Mine] &7Reset Mine" with lore "&8Clickable%nl%%nl%%wrap("Click to reset this mine's blocks!", "&7", 20)%%nl%%{_reset} ? ""%":
+                mine_canReset({_mine}) is true
+                mine_resetMine({_mine})
+
+            set {_slots::*} to (integers between 37 and 43)
+            format gui slot {_slots::*} with getFiller()
+
+            add ({mine::%{_mine}%::owner} parsed as offline player) to {_players::*}
+            add audience of mine_getStage({_mine}) where [input is not {mine::%{_mine}%::owner} parsed as offline player] to {_players::*}
+            loop {_players::*}:
+                set {_role} to "Visitor"
+                set {_role} to "Owner" if {mine::%{_mine}%::owner} parsed as offline player is loop-value
+                format gui slot {_slots::%loop-iteration%} with (skull of loop-value) named "{@main}[%{_role}%] &7%loop-value%%" &a&l●" if loop-value.isOnline() else " &c&l●"%"
+        open last gui for {_p}
+
+    if {_type} is "settings":
+        set {_slots::*} to (integers between 0 and 5)
+        play sound "block.piston.extend" with volume 1 and pitch 0.6 to {_p} if {_playsound} is true
+        create new gui with virtual dispenser inventory named "Mine Settings (%{_mine}%)":
+            format gui slot {_slots::*} with getFiller()
+            format gui slot 7 with dark oak door named "{@red}← Go Back":
+                play sound "block.piston.contract" with volume 1 and pitch 0.6 to {_p}
+                mine_openGUI({_p}, {_mine}, "main")
+        open last gui for {_p}
+        edit last gui:
+            create section with {_p}, {_mine}, {_setting}, {_settingName}, {_description::*}, {_item} stored in {_settingItem}:
+
+                if {_setting} is "resetPercentage" or "tax":
+                    set {_type} to "%%"
+                else if {_setting} is "maxAllowed":
+                    set {_type} to " player(s)"
+                set {_yes} to "%{mine::%{_mine}%::settings::%{_setting}%}%%{_type}%"
+
+                if {_setting} is "locked":
+                    if {mine::%{_mine}%::settings::%{_setting}%} is true:
+                        set {_color} to "&c"
+                        set {_do} to "unlock"
+                        set {_do2} to "locked"
+                    else if {mine::%{_mine}%::settings::%{_setting}%} is false:
+                        set {_color} to "&a"
+                        set {_do} to "lock"
+                        set {_do2} to "unlocked"
+                    set {_yes} to {_do2} in proper case
+                else:
+                    set {_options::*} to "{@main}+1%{_type} ? ""% {@green}(Left-Click)", "{@main}+10%{_type} ? ""% {@green}(Shift Left-Click)", "{@main}+1%{_type} ? ""% &c(Right-Click)" and "{@main}-10%{_type} ? ""% &c(Shift Right-Click)"
+
+                add "&8Setting" to {_lore::*}
+                add " " to {_lore::*}
+                add "%{_color} ? "{@main}"%Ⓓ Description" to {_lore::*}
+                loop {_description::*}:
+                    add " %{_color} ? "{@main}"%&l┃ &7%loop-value%" to {_lore::*}
+                if {_options::*} is set:
+                    add " " to {_lore::*}
+                    add "%{_color} ? "{@main}"%ⓞ Options" to {_lore::*}
+                
+                    loop {_options::*}:
+                        add " {@main}&l┃ %loop-value%" to {_lore::*}
+                add " " to {_lore::*}
+
+                add "%{_color} ? "{@main}"%&nClick to %{_do} ? "cycle"%" to {_lore::*}
+                return {_item} named "%{_color} ? "{@main}"%[%{_yes} ? "Setting"%] &7%{_settingName} in proper case%" with lore (join {_lore::*} with newline)
+            loop {@settings}:
+                set {_setting} to loop-value
+                set {_settingName} to {_setting}
+                set {_item} to paper
+                if {_setting} is "locked":
+                    set {_description::*} to ("Click to toggle wether", "or not players can", "visit your mine.")
+                    set {_settingName} to "Mine Lock"
+                else if {_setting} is "resetPercentage":
+                    set {_description::*} to ("Click to change the", "percentage required to", "automatically reset your mine.")
+                    set {_settingName} to "Reset Percent"
+                else if {_setting} is "tax":
+                    set {_description::*} to ("Click to change the", "amount of money &7that", "is taxed from others", "mining at your mine.")
+                else if {_setting} is "maxAllowed":
+                    set {_description::*} to ("Click to change how", "many players are allowed", "at your mine at", "the same time.")
+                    set {_settingName} to "Max Players"
+
+                run section {_settingItem} with {_p}, {_mine}, {_setting}, {_settingName}, {_description::*}, {_item} and store the result in {_item2} and wait
+                format gui slot {_slots::%loop-iteration%} with {_item2}:
+                    set {_clickType} to click type
+                    if {_setting} isn't "locked":
+
+                        if {_clickType} is left mouse button: # +1
+                            if mine_canIncrease({_mine}, {_setting}, 1):
+                                add 1 to {mine::%{_mine}%::settings::%{_setting}%}
+
+                        else if {_clickType} is left mouse button with shift: # +10
+                            if mine_canIncrease({_mine}, {_setting}, 10):
+                                add 10 to {mine::%{_mine}%::settings::%{_setting}%}
+
+                        else if {_clickType} is right mouse button: # -1
+                            if mine_canDecrease({_mine}, {_setting}, 1):
+                                remove 1 from {mine::%{_mine}%::settings::%{_setting}%}
+
+                        else if {_clickType} is right mouse button with shift: # -10
+                            if mine_canDecrease({_mine}, {_setting}, 10):
+                                remove 10 from {mine::%{_mine}%::settings::%{_setting}%}
+
+                    else:
+                        set {mine::%{_mine}%::settings::%{_setting}%} to !{mine::%{_mine}%::settings::%{_setting}%}
+                    mine_openGUI({_p}, {_mine}, "settings", false)
+
+function mine_canIncrease(mine: text, setting: text, amount: integer) :: boolean:
+    if {_setting} is "resetPercentage" or "tax":
+        return true if {mine::%{_mine}%::settings::%{_setting}%}+{_amount} <= 100
+    else if {_setting} is "maxAllowed":
+        return true if {mine::%{_mine}%::settings::%{_setting}%}+{_amount} <= 10
+    return false
+
+function mine_canDecrease(mine: text, setting: text, amount: integer) :: boolean:
+    if {_setting} is "resetPercentage":
+        return true if {mine::%{_mine}%::settings::%{_setting}%}-{_amount} >= 60
+    else if {_setting} is "tax":
+        return true if {mine::%{_mine}%::settings::%{_setting}%}-{_amount} >= 0
+    else if {_setting} is "maxAllowed":
+        return true if {mine::%{_mine}%::settings::%{_setting}%}-{_amount} >= 1
+    return false
+
+function mine_getBlocksNeeded(level: number) :: number:
+    return (ceil((100 + (10 * {_level}) / 1.1 )^ 1.3)) * (1+floor({_level}/3))
+
+function mine_openLevelGUI(p: player, mine: text, page: number = 1, fromMainGUI: boolean = false):
+    set {_size} to 20
+    create new gui with virtual chest inventory with 6 rows named "&nMine Upgrades&r (Page %{_page}%)":
+        set {_page::*} to page {_page} of (indexes of {-storage::minelevels::*}) with {_size} lines
+        set {_slots::*} to (10, 19, 28, 37, 38, 39, 30, 21, 12, 13, 14, 23, 32, 41, 42, 43, 34, 25 and 16)
+        set {_filler} to gray stained glass pane named " "
+        hide entire tool tip of {_filler}
+        format gui slot (integers from 0 and 54) with {_filler}
+        format gui slot {_slots::*} with getFiller()
+
+        format gui slot 48 with arrow named "{@red}← Previous Page":
+            if {_page} > 1:
+                mine_openLevelGUI({_p}, {_mine}, {_page}-1)
+            else:
+                editGUI({_p}, 48, barrier named "{@red}❌ No Page Found ❌" with lore wrap("Failed to find the page that was requested.", "&7"))
+        format gui slot 49 with (dark oak door if {_fromMainGUI} is true else barrier) named ("{@red}← Back" if {_fromMainGUI} is true else "{@red}Close"):
+            close {_p}'s inventory if {_fromMainGUI} is false
+            mine_openGUI({_p}, {_mine}) if {_fromMainGUI} is true
+        format gui slot 50 with arrow named "{@green}Next Page →":
+            if {-storage::minelevels::*} > {_page}*{_size}:
+                mine_openLevelGUI({_p}, {_mine}, {_page}+1)
+            else:
+                editGUI({_p}, 50, barrier named "{@red}❌ No Page Found ❌" with lore wrap("Failed to find the page that was requested.", "&7"))
+
+        open last gui to {_p}
+        edit last gui:
+
+            create section with {_item}, {_upgradeSize}, {_color}, {_level}, {_slot}, {_mined}, {_a} stored in {_guiItem}:
+                if {_item} isn't red dye:
+                    add "&8%{_a} ? ""%" to {_lore::*}
+                    add " " to {_lore::*}
+                    add "%{_color} ? "{@main}"%Ⓘ Information" to {_lore::*}
+                    add " %{_color} ? "{@main}"%&l┃ &7Mine Size: &f%{_upgradeSize}%" to {_lore::*}
+                    add " %{_color} ? "{@main}"%&l┃ &7Block: &f%formatBlock({-storage::minelevels::%{_slot}%::block})%" to {_lore::*}
+                    add " " to {_lore::*}
+                    if {_item} is yellow dye:
+                        add "%{_color} ? "&8"%Ⓟ Progress" to {_lore::*}
+                        add " %{_color} ? "&8"%&l┃ {@green}%format({_mined}, 2)% &8/ {@red}%format(mine_getBlocksNeeded({_slot}), 2)%" to {_lore::*}
+                        add " %{_color} ? "&8"%&l┃ &8[%progressBar({_mined}, mine_getBlocksNeeded({_slot}))%&8] &f&l%floor(({_mined}/mine_getBlocksNeeded({_slot}))*100)%&f%%" to {_lore::*}
+                        add " " to {_lore::*}
+                    return {_item} named "%{_color} ? "{@main}"%[Mine] &7Lv.%{_slot} ? "N/A"%" with lore (join {_lore::*} with newline)
+                else:
+                    return {_item} named "%{_color} ? "{@main}"%[Mine] &7Lv.%{_slot} ? "N/A"%" with lore " %nl%%wrap("Progress through the previous mine levels to view this level's information!", "&7")% "
+            
+            loop {_page::*}:
+                add 1 to {_slot}
+                set {_current} to {_slot}*({_page})
+                set {_level} to {mine::%{_mine}%::level} ? 0
+                set {_upgradeSize} to mine_getSizeText({_slot})
+                set {_mined} to {mine::%{_mine}%::blocksMined} ? 0
+
+                if {_slot} = {_level}+1:
+                    set {_item} to yellow dye
+                    set {_a} to "Next Level"
+                    set {_color} to "{@yellow}"
+                else if {_level} < {_slot}:
+                    set {_item} to red dye
+                    set {_a} to "Locked Level"
+                    set {_color} to "{@grey}"
+                else if {_level} = {_slot}:
+                    set {_item} to lime dye
+                    set {_a} to "Current Level"
+                    set {_color} to "{@green}"
+                else if {_level} > {_slot}:
+                    set {_item} to glowing lime dye
+                    set {_a} to "Previous Level"
+                    set {_color} to "{@green}"
+
+                run section {_guiItem} with {_item}, {_upgradeSize}, {_color}, {_level}, {_slot}, {_mined}, {_a} and store the result in {_gui} and wait
+                format gui slot {_slots::%{_slot}%} with {_gui}
+
+                delete {_item},{_upgradeSize},{_color},{_level},{_mined},{_gui},{_a}
+
+function mine_getSizeText(level: number) :: text:
+    set {_default} to {@defaultSize}
+    set {_x} to mine_getSize({_level}, "x")
+    set {_y} to mine_getSize({_level}, "y")
+    set {_z} to mine_getSize({_level}, "z")
+    return "%{_x}% x %{_y}% x %{_z}%"
+
+function mine_getSize(level: integer, f: text) :: integer:
+    if {_f} = "x":
+        return {@defaultSize}+floor({_level}/{@levelSizeIncrease}) if {@defaultSize}+floor({_level}/{@levelSizeIncrease}) <= {@maxSize} else {@maxSize}
+    else if {_f} = "y":
+        return {@defaultY}+(floor({_level}/{@levelSizeIncreaseY})) if {@defaultY}+(floor({_level}/{@levelSizeIncreaseY})) <= {@maxSizeY} else {@maxSizeY}
+    else if {_f} = "z":
+        return {@defaultSize}+floor({_level}/{@levelSizeIncrease}) if {@defaultSize}+floor({_level}/{@levelSizeIncrease}) <= {@maxSize} else {@maxSize}
+
+command /mine [<text>] [<text>]:
+    aliases: /mines
+    trigger:
+        if arg 1 is not set:
+            if mine of player is set:
+                mine_openGUI(player, mine of player)
+        else if arg 1 is "create":
+            arg 2 is set
+            if mine of player is set:
+                play sound "entity.villager.no" with volume 10 and pitch 1 to player
+                send "{@main}[Mines] &7You already have a mine."
+                stop
+            if all:
+                arg 2 is alphanumeric
+                length of arg 2 is between 4 and 10
+                arg 2 does not contain "nigger", "nigga", "fuck", "shit", "faggot"
+                {mines::*} doesn't contain arg 2
+            then:
+                mine_createMine(arg 2 in proper case, player)
+            else:
+                play sound "entity.villager.no" with volume 10 and pitch 1 to player
+                send formatted "{@main}[Mines] &7Invalid name. <tooltip:&8(&fInvalid Length/Not Alphanumeric/Bad Name&8)>&7(Hover for details)"
+
+        else if arg 1 is "home":
+            if mine of player is not set:
+                send "{@main}[Mines] &7You don't have a mine."
+                stop
+            mine_teleportToMine(player, mine of player)
+
+        else if arg 1 is "teleport" or "visit":
+            if all:
+                {mines::*} contains arg 2
+                mine_canVisit(player, arg 2) is true
+            then:
+                mine_teleportToMine(player, arg 2)
+            else:
+                play sound "entity.villager.no" with volume 10 and pitch 1 to player
+                send "{@main}[Mines] &7You cannot visit this mine."
+                stop
+        else if arg 1 is "reset":
+            if mine of player is not set:
+                play sound "entity.villager.no" with volume 10 and pitch 1 to player
+                send "{@main}[Mines] &7Unknown mine."
+                stop
+            mine_canReset(mine of player)
+            mine_resetMine(mine of player)

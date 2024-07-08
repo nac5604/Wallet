@@ -1,0 +1,146 @@
+options:
+    main: <##9074ff>
+    other: &f
+    maindarker: <##9074ff>
+    mainlighter: <##CABCFF>
+    np: &cYou don't have access to that command.
+
+    red: <##EA3939>
+    green: <##39EA5A>
+    grey: <##3A3939>
+    yellow: <##F8E31A>
+    blue: <##1AA8F8>
+
+function checkXP(p: player, item: item):
+    set {_xp} to double tag "tag;xp" of nbt compound of {_item}
+    set {_maxXP} to double tag "tag;maxXP" of nbt compound of {_item}
+    set {_level} to double tag "tag;level" of nbt compound of {_item}
+    if {_xp} >= {_maxXP}:
+        remove {_maxXP} from {_xp}
+        add 1 to {_level}
+        send title "{@main}%convertText("level up")%" with subtitle "&fYour pickaxe leveled up to {@main}%{_level}%" to {_p}
+        
+        set double tag "tag;xp" of nbt compound of {_item} to {_xp}
+        set double tag "tag;maxXP" of nbt compound of {_item} to getMaxXP({_level})
+        set double tag "tag;level" of nbt compound of {_item} to {_level}
+        set double tag "tag;moneyMulti" of nbt compound of {_item} to getMoneyMulti({_level})
+        set double tag "tag;xpMulti" of nbt compound of {_item} to getXPMulti({_level})
+        set {_p}'s tool to {_item}
+
+function getBlockValue(block: text) :: number:
+    return {-storage::blocks::%{_block}%::value} ? 0
+
+function getBlock(block: text) :: item:
+    set {_block::*} to {_block} split at ":"
+    return {_block::2} parsed as item
+
+function cblock(block: text) :: string:
+    replace all "_" in {_block} with " "
+    replace all "minecraft:" in {_block} with ""
+    return {_block}
+
+function bm_newBlockMsg(p: player, block: text):
+    {-storage::blocks::%{_block}%} is set
+    play sound "ui.cartography_table.take_result" with volume 1 and pitch 1 to {_p}
+    send "{@main}&m                                        " to {_p}
+    send "     {@main}&l%convertText("new block discovery")%" to {_p}
+    send " " to {_p}
+    send "     &7You have discovered {@main}%formatBlock({_block})%&7." to {_p}
+    send "     &7Type &8(&f/blockmastery&8) &7to view its mastery." to {_p}
+    send " " to {_p}
+    send "{@main}&m                                        " to {_p}
+
+function bm_blockLvlUpMsg(p: player, block: text, lvl: number):
+    {-storage::blocks::%{_block}%} is set
+    play sound "entity.player.levelup" with volume 1 and pitch 0.8 to {_p}
+    send "{@main}&m                                        " to {_p}
+    send "     {@maindarker}&l%convertText("block mastery levelup!")%" to {_p}
+    send " " to {_p}
+    send "           {@mainlighter}%formatBlock({_block})%" to {_p}
+    send "        &8( &cLv.%{_lvl}% &7-> &aLv.%{_lvl}+1% &8)" to {_p}
+    send " " to {_p}
+    send "           {@main}%convertText("rewards")%" to {_p}
+    loop split bm_getRewards({_block}, {_lvl}) at "|":
+        send "        &7%bm_formatReward(loop-value)%" to {_p}
+    send " " to {_p}
+    send "{@main}&m                                        " to {_p}
+
+on load:
+    create section with {_p}, {_block} stored in {-section::CheckBM}:
+        if {stats::%{_p}%::mined::%{_block}%} isn't set:
+            bm_newBlockMsg({_p}, {_block})
+        run section {-section::bm::GetLevel} with {_p}, {_block} and store the result in {_lvlBefore} and wait
+        add 1 to {stats::%{_p}%::mined::%{_block}%}
+        {stats::%{_p}%::mined::%{_block}%} <= bm_getLevelRequired({_block}, ({_lvlBefore}+1) ? 0)
+        run section {-section::bm::GetLevel} with {_p}, {_block} and store the result in {_lvlAfter} and wait
+        if {_lvlAfter} > {_lvlBefore}:
+            bm_blockLvlUpMsg({_p}, {_block}, {_lvlAfter})
+
+    create section with {_p} stored in {-section::CheckPickaxe}:
+        checkXP({_p}, {_p}'s tool)
+        set {_p}'s tool to lore({_p}'s tool) if lore({_p}'s tool) isn't air
+
+    create section with {_mine} stored in {-section::CheckLevel}:
+        set {_level} to {mine::%{_mine}%::level}
+        if {mine::%{_mine}%::blocksMined} >= mine_getBlocksNeeded({_level}):
+            set {mine::%{_mine}%::blocksMined} to 0
+            add 1 to {mine::%{_mine}%::level} if {_level} = {mine::%{_mine}%::level}
+            loop audience of mine_getStage({_mine}):
+                send title "{@main}%convertText("mine level up")% &8({@main}%{mine::%{_mine}%::level}-1% &8-> {@main}%{mine::%{_mine}%::level}%&8)" with subtitle "&fThe mine {@main}%{_mine}% &fhas leveled up!" to loop-value
+
+on blockify break:
+    "%event-view%" contains "mine"
+    event-blockdata is not minecraft:air
+    player is holding a pickaxe
+    set {_block} to "%blockDataToItem(event-blockdata)%"
+    {_block} is set
+    set {_mine} to mine_getMineFromStage(event-stage)
+
+    # running the things in the background
+    run section {-section::CanReset} async with {_mine}
+    run section {-section::CheckLevel} async with {_mine}
+    run section {-section::CheckBM} async with player and {_block}
+
+    run section {-section::bm::GetMultiPlayer} with player, {_block}, "xp" and store the result in {_xpMulti} and wait
+    run section {-section::bm::GetMultiPlayer} with player, {_block}, "money" and store the result in {_moneyMulti} and wait
+    add 1 to {_xpMulti}, {_moneyMulti}
+
+    set {_level} to double tag "tag;level" of nbt compound of player's tool
+    add getXPMulti({_level})-1 to {_xpMulti}
+    add getMoneyMulti({_level})-1 to {_moneyMulti}
+    add 1 to {stats::%player%::mined}, {mine::%{_mine}%::blocksMined}, {mine::%{_mine}%::mined::%player%}, {mine::%{_mine}%::totalMined}
+    run section {-section::bm::GetLevel} with player, {_block} and store the result in {_level} and wait
+    set {_mined} to {stats::%player%::mined::%{_block}%}
+    set {_required} to bm_getLevelRequired({_block}, {_level}+1)
+
+    set {_blockValue} to getBlockValue({_block})
+    add {_blockValue} to {_totalMoney}
+    set {_totalMoney} to {_totalMoney}*({_moneyMulti} ? 1)
+
+    set {_xp} to 1
+    set {_xp} to {_xp}*({_xpMulti} ? 1)
+
+    set double tag "tag;xp" of nbt compound of player's tool to double tag "tag;xp" of nbt compound of player's tool + {_xp}
+    run section {-section::CheckPickaxe} async with player
+    if {_xp} > 0:
+        add "{@main}+%format({_xp}, 2)% Pickaxe XP" to {_bar::*}
+
+    if {_totalMoney} > 0:
+        add "{@main}+$%format({_totalMoney}, 2)%" to {_bar::*}
+    
+    set {_formatted} to formatBlock({_block})
+    set {_req} to "%format({_required}, 2)%" if {_required} is set else "{@green}&lMAXED"
+    add "{@main}%{_formatted} ? "N/A"% Mastery &8({@green}%format({_mined}, 2)% &8/ {@red}%{_req}%&8)" to {_bar::*}
+    send action bar (join {_bar::*} with " &8|&r ") to player
+
+    add {_totalMoney} to {stats::%player%::balance}
+
+every second:
+    loop indices of {generators::*}:
+        set {_loc} to location(x-coordinate of loop-value, y-coordinate of loop-value, z-coordinate of loop-value, world of loop-value)
+        loop all blocks in radius 3 around {_loc} where [y-coord of input = y-coord of {_loc}]:
+            loop-block is air
+            broadcast true
+            chance of 50%%:
+                drop random element of {lootTable::%{generators::%loop-value-1%::level}%::*} at loop-block without velocity
+        wait 1 tick if mod(loop-iteration, 5) = 0

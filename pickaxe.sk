@@ -1,0 +1,145 @@
+options:
+    main: <##9074ff>
+    other: &f
+    np: &cYou don't have access to that command.
+
+expression hide all flags of %object%:
+    get:
+        return expr-1 with nbt from "{""!minecraft:attribute_modifiers"":{}}"
+
+function lore(item: item) :: item:
+    set {_enchants} to string tag "tag;CustomEnchants" of nbt compound of {_item}
+    {_enchants} is set:
+        set {_split::*} to split {_enchants} at ","
+        loop {_split::*}:
+            set {_split2::*} to split loop-value at ":"
+            set {_value} to {_split2::2} parsed as number if {_split2::2} parsed as number is set
+            set {_enchants::%{_split2::1}%} to {_value}
+
+    set {_xp} to double tag "tag;xp" of nbt compound of {_item}
+    set {_maxXP} to double tag "tag;maxXP" of nbt compound of {_item}
+    set {_level} to double tag "tag;level" of nbt compound of {_item}
+
+    set {_blocksBroken} to double tag "tag;blocksBroken" of nbt compound of {_item}
+    set {_xpMulti} to double tag "tag;xpMulti" of nbt compound of {_item}
+    set {_moneyMulti} to double tag "tag;moneyMulti" of nbt compound of {_item}
+    set {_name} to string tag "tag;name" of nbt compound of {_item}
+
+    add " " to {_lore::*}
+    add " <##50C878>%{_moneyMulti} ? 0%x &7Money Multiplier" to {_lore::*}
+    add " {@main}%{_xpMulti} ? 0%x &7XP Multiplier" to {_lore::*}
+    add " {@other}%format(({_blocksBroken} ? 0), 2)% &7Blocks Broken" to {_lore::*} if {_blocksBroken} > 0
+
+    add " " to {_lore::*}
+    add " &7Level: {@main}%{_level}% &8( %format(({_xp} ? 0), 2)%  / %format(({_maxXP} ? 0), 2)% )" to {_lore::*}
+    add " &7Progress: %progressBar({_xp}, {_maxXP})% &7%floor(({_xp}/{_maxXP})*100)%%%" to {_lore::*}
+    add " " to {_lore::*}
+    loop {_enchants::*}:
+        add 1 to {_i}
+        set {_rarityWeight} to rarityWeight(enchants_getRarity(loop-index))
+        set {_sort::%{_rarityWeight}%.%loop-value%.%{_i}%} to loop-index
+    set {_sorted::*} to (reversed {_sort::*})
+    loop {_sorted::*}:
+        set {_rarity} to enchants_getRarity(loop-value)
+        add 1 to {_a}
+        set {_max} to " %enchants_getRarityColor({_rarity})%&lMAX" if getPickEnchant({_item}, loop-value) >= enchants_maxLevel(loop-value)
+        add " &7%loop-value in proper case% %enchants_getRarityColor({_rarity})%%format(getPickEnchant({_item}, loop-value), 2)%%{_max} ? ""%" to {_lore::*}
+    add " " to {_lore::*} if size of {_enchants::*} > 0
+
+    set {_lore} to join {_lore::*} with newline
+    set lore of {_item} to {_lore}
+    enchant {_item} with ("efficiency %getPickEnchant({_item}, "Efficiency")%") parsed as enchantment type if getPickEnchant({_item}, "Efficiency") > 0
+    if {_blocksBroken} > 0:
+        set name of {_item} to "%{_name}% &8(&f%format({_blocksBroken}, 2)%&8)"
+    else:
+        set name of {_item} to {_name}
+    return hide all flags of {_item} if (hide all flags of {_item} isn't air)
+    return {_item}
+
+function rarityWeight(rarity: text) :: number:
+    return 10 if {_rarity} is "Common"
+    return 20 if {_rarity} is "Uncommon"
+    return 30 if {_rarity} is "Rare"
+    return 40 if {_rarity} is "Epic"
+    return 50 if {_rarity} is "Legendary"
+    return 60 if {_rarity} is "Mythic"
+    return 0
+
+function enchant(item: item, enchant: text, amount: integer, boolean: boolean = true) :: item:
+    # {_boolean} = true -> adding {_amount} to current level of {_enchant}
+    # {_boolean} = false -> setting current level of {_enchant} to {_amount}
+    set {_level} to getPickEnchant({_item}, {_enchant})
+    add {_amount} to {_level}
+    set {_enchants::*} to getPickEnchants({_item})
+    loop {_enchants::*}:
+        set {_split::*} to split loop-value at ":"
+        if {_split::1} is {_enchant}:
+            set {_value} to loop-value
+            if {_boolean} is true:
+                replace all ":%{_level} - {_amount}%" in {_value} with ":%{_level}%"
+            else:
+                replace all ":%{_level} - {_amount}%" in {_value} with ":%{_amount}%"
+            if {_value} is "%{_enchant}%:<none>":
+                if {_boolean} is true:
+                    replace all ":<none>" in {_value} with ":%{_level}%"
+                else:
+                    replace all ":<none>" in {_value} with ":%{_amount}%"
+            set {_enchants::%loop-index%} to {_value}
+            set {_set} to true
+    set {_enchant} to {_enchant} in proper case
+    add "%{_enchant}%:%{_amount} ? 1%" to {_enchants::*} if {_set} is not set
+    set {_compound} to nbt compound of {_item}
+    set string tag "tag;CustomEnchants" of {_compound} to join {_enchants::*} with "," if {_enchants::*} is set        
+    set string tag "tag;CustomEnchants" of {_compound} to "%{_enchant}%:%{_amount}%" if {_enchants::*} isn't set
+    return lore({_item})
+
+function getPickEnchant(item: item, enchant: text) :: number:
+    set {_enchants::*} to getPickEnchants({_item})
+    loop {_enchants::*}:
+        set {_split::*} to split loop-value at ":"
+        set {_enchant::%{_split::1}%} to {_split::2} parsed as number
+    return {_enchant::%{_enchant}%} if ({_enchant::%{_enchant}%} is set) else 0
+
+function getPickEnchants(item: item) :: objects:
+    set {_enchants} to string tag "tag;CustomEnchants" of nbt compound of {_item}
+    if {_enchants} is set:
+        set {_split::*} to split {_enchants} at ","
+        return {_split::*} if {_enchants} is set
+    return null
+
+function getMaxXP(level: integer) :: integer:
+    return (60*{_level})+({_level}^1.12)
+
+function getXPMulti(level: integer) :: number:
+    return 1+{_level}/100
+
+function getMoneyMulti(level: integer) :: number:
+    return 1+({_level}/200)
+
+function pickaxe() :: item:
+
+    set {_lvl} to 1
+
+    set {_item} to wooden pickaxe
+    set double tag "tag;xp" of nbt compound of {_item} to 0
+    set double tag "tag;maxXP" of nbt compound of {_item} to getMaxXP({_lvl})
+    set double tag "tag;level" of nbt compound of {_item} to {_lvl}
+    set double tag "tag;blocksBroken" of nbt compound of {_item} to 0
+    set double tag "tag;xpMulti" of nbt compound of {_item} to getXPMulti({_lvl})
+    set double tag "tag;moneyMulti" of nbt compound of {_item} to getMoneyMulti({_lvl})
+    set string tag "tag;name" of nbt compound of {_item} to "<##7B3F00>Wooden Pickaxe"
+    set {_item} to lore({_item})
+
+    return enchant({_item}, "Efficiency", 100) with all item flags
+
+command /pickaxe:
+    trigger:
+        player's inventory does not contain a pickaxe
+        give player pickaxe()
+
+command /enchant <text> <integer>:
+    permission: *
+    trigger:
+        player is holding pickaxe
+        arg 2 > 0
+        set player's tool to enchant(player's tool, arg 1, arg 2)

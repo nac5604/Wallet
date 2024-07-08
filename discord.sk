@@ -1,0 +1,71 @@
+options:
+    main: <##A993FF>
+    other: &f
+
+    name: Wallet
+    guild: 1252723183006650569
+    channel: 1259170504120729711
+    announceJoins: true
+    announceLeaves: true
+
+define new bot named "{@name}":
+    token: "MTI1ODk4MzUzMzAzMzI5MTgyNg.GHzB_M.sPnDN5bo1tXh6jO9-LhVcVP2Wuh8R_2si6b04o"
+    intents: default intents
+    auto reconnect: true
+    force reload: false
+
+    on ready:
+        bot_updateStatus(bot())
+
+on load:
+    bot_updateStatus(bot())
+
+on join:
+    event is not canceled
+    bot_updateStatus(bot())
+
+on quit:
+    event is not canceled
+    bot_updateStatus(bot())
+
+slash command help:
+    description: Displays the bot's commands.
+    bot: Wallet
+    guilds: {@guild}
+    trigger:
+        make embed and store it in {_embed}:
+            set title of embed to "Help"
+            set description of embed to "Commands:"
+        reply with {_embed}
+
+function bot() :: bot:
+    return bot named "{@name}"
+
+function bot_updateStatus(bot: bot):
+    set presence of {_bot} to watching "%size of all players% players"
+    set online status of {_bot} to do not disturb
+
+on chat:
+    event is not canceled
+    message doesn't contain "@", "<", ">" or "`"
+    set {_rankPrefix} to "[Rank %{mine::%mine of player%::level} ? 0%] " if mine of player is set && {mine::%mine of player%::level} > 0 else ""
+    post "%{_rankPrefix}%%player%: %message%" to channel with id "{@channel}"
+
+on join:
+    post "<:green_minus:1252726419721556019> %player% joined the server. **(%size of all players%/%max players%)**" to channel with id "{@channel}"
+
+on disconnect:
+    post "<:red_minus:1252726418769449010> %player% left the server. **(%size of all players%/%max players%)**" to channel with id "{@channel}"
+
+on message receive:
+    event-user is not a discord bot
+    "%event-textchannel%" contains "in-game"
+    broadcast "{@main}[DISCORD] &7%event-user%: &f%event-message%"
+
+on member join:
+    if {@announceJoins} is true:
+        broadcast "{@main}[DISCORD] {@other}%event-user% &7has joined the discord server."
+
+on member leave:
+    if {@announceLeaves} is true:
+        broadcast "{@main}[DISCORD] {@other}%event-user% &7has left the discord server."
